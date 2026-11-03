@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gambit's knight (same art as the in-game piece set) inside the 66dp adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.62"
+        android:scaleY="0.62"
+        android:translateX="23"
+        android:translateY="23">
+        <path
+            android:fillColor="#F7F5F0"
+            android:strokeColor="#1D1D21"
+            android:strokeLineJoin="round"
+            android:strokeWidth="3.5"
+            android:pathData="M29,77 C29,66 34,60 43,55 C37,57 30,60 24,61 C18,62 14,57 16,52 C17,47 21,45 25,42 L35,31 C37,25 39,18 44,12 L49,21 C66,22 77,39 75,60 L73,77 Z" />
+        <path
+            android:fillColor="#F7F5F0"
+            android:strokeColor="#1D1D21"
+            android:strokeLineJoin="round"
+            android:strokeWidth="3.5"
+            android:pathData="M22,81 Q22,76 27,76 L73,76 Q78,76 78,81 L78,85 Q78,90 73,90 L27,90 Q22,90 22,85 Z" />
+        <path
+            android:strokeColor="#1D1D21"
+            android:strokeLineCap="round"
+            android:strokeWidth="3"
+            android:pathData="M31.3,35.5 A2.2,2.2 0 1,1 35.7,35.5 A2.2,2.2 0 1,1 31.3,35.5 Z M20,53 L24,52 M49,22 C60,26 68,38 69,55" />
+    </group>
+</vector>

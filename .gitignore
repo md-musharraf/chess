@@ -1,0 +1,18 @@
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+.kotlin/
+
+# Server
+server/node_modules/
+server/*.db
+server/*.db-*
+
+# Environment & secrets
+.env*
+*.env*
+
