@@ -88,4 +88,57 @@ class Game {
         p.unmake()
         return sb.toString()
     }
+
+    /** Reconstructs the position at [ply]. Returns [position] directly if [ply] is the live position. */
+    fun positionAt(ply: Int): Position {
+        if (ply == played.size) return position
+        val p = Position.start()
+        val limit = ply.coerceIn(0, played.size)
+        for (i in 0 until limit) {
+            p.make(played[i])
+        }
+        return p
+    }
+
+    /** Formats the position at [ply] as FEN. */
+    fun fenAt(ply: Int): String {
+        val limit = ply.coerceIn(0, played.size)
+        return positionAt(limit).toFen(fullmove = (limit / 2) + 1)
+    }
+
+    /** Returns the FEN string of the current board state. */
+    fun currentFen(): String = position.toFen(fullmove = (played.size / 2) + 1)
+
+    /** Generates a standard PGN string for this game. */
+    fun toPgn(
+        white: String = "White",
+        black: String = "Black",
+        event: String = "Gambit Chess Game",
+        site: String = "Gambit Mobile",
+        date: String = java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale.US).format(java.util.Date()),
+    ): String = buildString {
+        val resultStr = when (outcome?.winner) {
+            WHITE -> "1-0"
+            BLACK -> "0-1"
+            0 -> "1/2-1/2"
+            else -> "*"
+        }
+        fun esc(s: String) = s.replace("\"", "\\\"")
+        appendLine("""[Event "${esc(event)}"]""")
+        appendLine("""[Site "${esc(site)}"]""")
+        appendLine("""[Date "$date"]""")
+        appendLine("""[Round "1"]""")
+        appendLine("""[White "${esc(white)}"]""")
+        appendLine("""[Black "${esc(black)}"]""")
+        appendLine("""[Result "$resultStr"]""")
+        appendLine()
+        for (i in sans.indices) {
+            if (i % 2 == 0) {
+                append("${(i / 2) + 1}. ")
+            }
+            append(sans[i])
+            append(' ')
+        }
+        append(resultStr)
+    }
 }

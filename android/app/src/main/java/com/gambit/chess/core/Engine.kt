@@ -266,3 +266,7 @@ internal fun evaluate(p: Position): Int {
     }
     return score * p.side
 }
+
+/** Static evaluation in centipawns from White's perspective (+ means White leads, - means Black leads). */
+fun evaluateFromWhite(p: Position): Int = evaluate(p) * p.side
+

@@ -1,6 +1,11 @@
 package com.gambit.chess.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -42,8 +47,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -164,6 +175,28 @@ fun GameScreen(
     }
 
     val board = view.board
+    val context = LocalContext.current
+    val copyToClipboard = { label: String, text: String ->
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val sharePgn = {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Gambit Chess Game")
+            putExtra(Intent.EXTRA_TEXT, view.pgn)
+        }
+        context.startActivity(Intent.createChooser(intent, "Share PGN"))
+    }
+    val effectiveSubtitle = when {
+        view.opening != null && subtitle.isNotEmpty() -> "$subtitle · ${view.opening}"
+        view.opening != null -> view.opening
+        else -> subtitle
+    }
+
     val browse = listOf(
         GameAction(Icons.Rounded.ChevronLeft, "Back", view.ply > 0) { onBrowse(view.ply - 1) },
         GameAction(Icons.Rounded.ChevronRight, "Next", view.ply < view.livePly) { onBrowse(view.ply + 1) },
@@ -185,15 +218,45 @@ fun GameScreen(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             if (maxWidth <= maxHeight) {
                 Column(Modifier.fillMaxSize()) {
-                    TopBar(title, subtitle, onBack, onFlip)
+                    TopBar(
+                        title = title,
+                        subtitle = effectiveSubtitle,
+                        onBack = onBack,
+                        onFlip = onFlip,
+                        onCopyFen = { copyToClipboard("FEN", view.fen) },
+                        onCopyPgn = { copyToClipboard("PGN", view.pgn) },
+                        onSharePgn = sharePgn,
+                    )
                     Column(
                         Modifier.weight(1f).fillMaxWidth(),
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Player(ui.top)
-                        // Weighted last, so on short screens the board shrinks instead of pushing the bars off.
-                        Board(Modifier.weight(1f, fill = false).padding(horizontal = 4.dp))
+                        BoxWithConstraints(
+                            modifier = Modifier.weight(1f, fill = false).padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val barWidth = 22.dp
+                            val barGap = 6.dp
+                            val totalBar = if (settings.showEvalBar) barWidth + barGap else 0.dp
+                            val boardSize = minOf(maxWidth - totalBar, maxHeight)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                            ) {
+                                if (settings.showEvalBar) {
+                                    EvalBar(
+                                        centipawns = view.evalScore,
+                                        flipped = ui.flipped,
+                                        outcome = ui.outcome,
+                                        modifier = Modifier.size(width = barWidth, height = boardSize),
+                                    )
+                                    Spacer(Modifier.width(barGap))
+                                }
+                                Board(Modifier.size(boardSize))
+                            }
+                        }
                         Player(ui.bottom)
                         banner?.invoke(this)
                     }
@@ -202,9 +265,28 @@ fun GameScreen(
                 }
             } else {
                 Row(Modifier.fillMaxSize()) {
+                    val barWidth = 22.dp
+                    val barGap = 6.dp
+                    if (settings.showEvalBar) {
+                        EvalBar(
+                            centipawns = view.evalScore,
+                            flipped = ui.flipped,
+                            outcome = ui.outcome,
+                            modifier = Modifier.width(barWidth).fillMaxHeight().padding(start = 8.dp, top = 8.dp, bottom = 8.dp),
+                        )
+                        Spacer(Modifier.width(barGap))
+                    }
                     Board(Modifier.fillMaxHeight().padding(8.dp))
                     Column(Modifier.weight(1f).fillMaxHeight()) {
-                        TopBar(title, subtitle, onBack, onFlip)
+                        TopBar(
+                            title = title,
+                            subtitle = effectiveSubtitle,
+                            onBack = onBack,
+                            onFlip = onFlip,
+                            onCopyFen = { copyToClipboard("FEN", view.fen) },
+                            onCopyPgn = { copyToClipboard("PGN", view.pgn) },
+                            onSharePgn = sharePgn,
+                        )
                         Player(ui.top)
                         MoveList(view.sans, view.ply, onBrowse)
                         banner?.invoke(this)
@@ -221,7 +303,7 @@ fun GameScreen(
             exit = slideOutVertically { it } + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            if (result != null) ResultCard(result, onViewBoard = { resultDismissed = true })
+            if (result != null) ResultCard(result, onViewBoard = { resultDismissed = true }, onSharePgn = sharePgn)
         }
         if (result != null && resultDismissed) {
             Button(
@@ -233,7 +315,16 @@ fun GameScreen(
 }
 
 @Composable
-private fun TopBar(title: String, subtitle: String, onBack: () -> Unit, onFlip: () -> Unit) {
+private fun TopBar(
+    title: String,
+    subtitle: String,
+    onBack: () -> Unit,
+    onFlip: () -> Unit,
+    onCopyFen: () -> Unit,
+    onCopyPgn: () -> Unit,
+    onSharePgn: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
         Column(Modifier.weight(1f)) {
@@ -241,6 +332,35 @@ private fun TopBar(title: String, subtitle: String, onBack: () -> Unit, onFlip: 
             if (subtitle.isNotEmpty()) Text(subtitle, color = Palette.Muted, fontSize = 12.sp, maxLines = 1)
         }
         IconButton(onClick = onFlip) { Icon(Icons.Rounded.SwapVert, contentDescription = "Flip board") }
+        Box {
+            IconButton(onClick = { menuOpen = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More actions") }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Copy FEN") },
+                    onClick = {
+                        menuOpen = false
+                        onCopyFen()
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Copy PGN") },
+                    onClick = {
+                        menuOpen = false
+                        onCopyPgn()
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Share PGN") },
+                    onClick = {
+                        menuOpen = false
+                        onSharePgn()
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.Share, contentDescription = null) },
+                )
+            }
+        }
     }
 }
 
@@ -363,7 +483,7 @@ private fun ControlBar(actions: List<GameAction>) {
 }
 
 @Composable
-private fun ResultCard(r: ResultInfo, onViewBoard: () -> Unit) {
+private fun ResultCard(r: ResultInfo, onViewBoard: () -> Unit, onSharePgn: () -> Unit) {
     Surface(
         color = Palette.Raised,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -387,8 +507,9 @@ private fun ResultCard(r: ResultInfo, onViewBoard: () -> Unit) {
             }
             Text(r.detail, color = Palette.Muted, modifier = Modifier.padding(top = 4.dp, bottom = 18.dp))
             Button(onClick = r.onPrimary, modifier = Modifier.fillMaxWidth().height(50.dp)) { Text(r.primary, fontSize = 16.sp) }
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onViewBoard, modifier = Modifier.weight(1f)) { Text("View board") }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onViewBoard, modifier = Modifier.weight(1f)) { Text("Board") }
+                OutlinedButton(onClick = onSharePgn, modifier = Modifier.weight(1f)) { Text("Share") }
                 OutlinedButton(onClick = r.onSecondary, modifier = Modifier.weight(1f)) { Text(r.secondary) }
             }
         }

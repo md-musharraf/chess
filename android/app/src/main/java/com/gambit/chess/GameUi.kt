@@ -4,8 +4,12 @@ import androidx.compose.runtime.Immutable
 import com.gambit.chess.core.BLACK
 import com.gambit.chess.core.Game
 import com.gambit.chess.core.KING
+import com.gambit.chess.core.OpeningBook
 import com.gambit.chess.core.Outcome
+import com.gambit.chess.core.Position
 import com.gambit.chess.core.WHITE
+import com.gambit.chess.core.evaluateFromWhite
+import com.gambit.chess.core.uci
 
 /** What the board shows: the live position or one being browsed in the move list. */
 @Immutable
@@ -18,6 +22,10 @@ class BoardView(
     val sans: List<String>,
     val ply: Int,
     val livePly: Int,
+    val evalScore: Int = 0,
+    val opening: String? = null,
+    val fen: String = "",
+    val pgn: String = "",
 ) {
     companion object {
         fun of(game: Game, viewPly: Int?, canMove: Boolean): BoardView {
@@ -26,6 +34,11 @@ class BoardView(
             val board = game.boardAt(ply)
             val toMove = if (ply % 2 == 0) WHITE else BLACK
             val checked = ply > 0 && game.sanMoves[ply - 1].last() in "+#"
+            val ucis = game.moves.take(ply).map { uci(it) }
+            val opening = OpeningBook.find(ucis)?.name
+            val pos = game.positionAt(ply)
+            val fen = pos.toFen(fullmove = (ply / 2) + 1)
+            val eval = evaluateFromWhite(pos)
             return BoardView(
                 board = board,
                 lastMove = if (ply > 0) game.moves[ply - 1] else 0,
@@ -34,6 +47,10 @@ class BoardView(
                 sans = game.sanMoves.toList(),
                 ply = ply,
                 livePly = live,
+                evalScore = eval,
+                opening = opening,
+                fen = fen,
+                pgn = game.toPgn(),
             )
         }
     }

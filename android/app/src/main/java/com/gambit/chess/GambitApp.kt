@@ -18,6 +18,7 @@ data class Settings(
     val theme: Int = 0,
     val sound: Boolean = true,
     val showLegal: Boolean = true,
+    val showEvalBar: Boolean = true,
     val server: String = "",
     val level: Level = Level.CASUAL,
     /** WHITE, BLACK, or 0 for random. */

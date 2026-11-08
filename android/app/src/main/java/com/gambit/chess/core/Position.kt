@@ -307,6 +307,37 @@ class Position private constructor() {
         return knights + bishops <= 1 || (knights == 0 && bishopSquareColors != 3)
     }
 
+    fun toFen(fullmove: Int = 1): String = buildString {
+        for (r in 7 downTo 0) {
+            var empty = 0
+            for (f in 0..7) {
+                val pc = board[r * 8 + f]
+                if (pc == 0) {
+                    empty++
+                } else {
+                    if (empty > 0) {
+                        append(empty)
+                        empty = 0
+                    }
+                    val char = "pnbrqk"[abs(pc) - 1]
+                    append(if (pc > 0) char.uppercaseChar() else char)
+                }
+            }
+            if (empty > 0) append(empty)
+            if (r > 0) append('/')
+        }
+        append(if (side == WHITE) " w " else " b ")
+        val rights = StringBuilder()
+        if (castling and 1 != 0) rights.append('K')
+        if (castling and 2 != 0) rights.append('Q')
+        if (castling and 4 != 0) rights.append('k')
+        if (castling and 8 != 0) rights.append('q')
+        append(if (rights.isEmpty()) "-" else rights.toString())
+        append(' ')
+        append(if (ep >= 0) squareName(ep) else "-")
+        append(" $halfmove $fullmove")
+    }
+
     companion object {
         const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 

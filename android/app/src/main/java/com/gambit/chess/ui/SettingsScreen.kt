@@ -111,6 +111,7 @@ fun SettingsScreen(settings: Settings, onChange: ((Settings) -> Settings) -> Uni
                     Column {
                         Toggle("Move sounds", "Wooden clicks, captures and checks", settings.sound) { v -> onChange { it.copy(sound = v) } }
                         Toggle("Show legal moves", "Dots on the squares a piece can reach", settings.showLegal) { v -> onChange { it.copy(showLegal = v) } }
+                        Toggle("Evaluation bar", "Show real-time advantage bar and score", settings.showEvalBar) { v -> onChange { it.copy(showEvalBar = v) } }
                     }
                 }
 

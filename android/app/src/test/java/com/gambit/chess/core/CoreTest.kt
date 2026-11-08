@@ -85,4 +85,50 @@ class CoreTest {
         Engine().think(g.position, Level.ADVANCED)
         assertTrue(before.contentEquals(g.position.board))
     }
+
+    @Test fun fenRoundTrip() {
+        val start = Position.start()
+        assertEquals(Position.START_FEN, start.toFen())
+
+        val kiwi = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+        assertEquals(kiwi, Position.fromFen(kiwi).toFen())
+    }
+
+    @Test fun pgnExport() {
+        val g = game("f2f3", "e7e5", "g2g4", "d8h4")
+        val pgn = g.toPgn(white = "Alice", black = "Bob", event = "Championship")
+        assertTrue(pgn.contains("[Event \"Championship\"]"))
+        assertTrue(pgn.contains("[White \"Alice\"]"))
+        assertTrue(pgn.contains("[Black \"Bob\"]"))
+        assertTrue(pgn.contains("[Result \"0-1\"]"))
+        assertTrue(pgn.contains("1. f3 e5 2. g4 Qh4# 0-1"))
+    }
+
+    @Test fun openingBookRecognition() {
+        assertEquals("King's Pawn Opening", OpeningBook.find(listOf("e2e4"))?.name)
+        assertEquals("Open Game", OpeningBook.find(listOf("e2e4", "e7e5"))?.name)
+        assertEquals("Ruy Lopez", OpeningBook.find(listOf("e2e4", "e7e5", "g1f3", "b8c6", "f1b5"))?.name)
+        assertEquals("Ruy Lopez: Morphy Defense", OpeningBook.find(listOf("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6"))?.name)
+        assertEquals("Sicilian: Najdorf", OpeningBook.find(listOf("e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "a7a6"))?.name)
+        assertEquals("Ruy Lopez: Morphy Defense", OpeningBook.find(listOf("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "h2h3"))?.name)
+    }
+
+    @Test fun fenWithEnPassant() {
+        val g = game("e2e4", "a7a6", "e4e5", "d7d5")
+        val fen = g.currentFen()
+        assertTrue("FEN should have en-passant square d6: $fen", fen.contains(" d6 "))
+        val roundTrip = Position.fromFen(fen).toFen(fullmove = 3)
+        assertEquals(fen, roundTrip)
+    }
+
+    @Test fun evaluationPerspective() {
+        // Initial position is symmetric / balanced
+        val startEval = evaluateFromWhite(Position.start())
+        assertTrue("Start evaluation should be near 0 centipawns: $startEval", kotlin.math.abs(startEval) < 50)
+
+        // If White captures Black's queen, White evaluation should be heavily positive
+        val freeQueen = Position.fromFen("4k3/8/8/8/8/8/3R4/4K3 w - - 0 1")
+        val score = evaluateFromWhite(freeQueen)
+        assertTrue("Rook up should give substantial positive score: $score", score > 400)
+    }
 }
