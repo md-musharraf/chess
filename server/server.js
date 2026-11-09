@@ -9,6 +9,7 @@ import { Chess } from "chess.js";
 export const TIME_CONTROLS = { "3+2": [180_000, 2_000], "5+0": [300_000, 0], "10+0": [600_000, 0] };
 const K_FACTOR = 32;
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const ALLOWED_EMOJIS = new Set(["👍", "👏", "🔥", "😮", "♟️", "💡"]);
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -49,6 +50,7 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
   const db = new DatabaseSync(dbPath);
   db.exec(`
     PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 5000;
     CREATE TABLE IF NOT EXISTS players (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -102,7 +104,12 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
     return token ? sql.byToken.get(hashToken(token))?.id : undefined;
   };
 
-  // ponytail: in-memory per-IP signup limiter; move to Redis if you ever run more than one instance
+  const publicProfile = (id) => {
+    const p = sql.profile.get(id);
+    return p ? { id: p.id, name: p.name, rating: p.rating } : { id, name: "Unknown", rating: 1200 };
+  };
+
+  // In-memory per-IP signup limiter
   const signups = new Map();
   function signupLimited(ip) {
     const now = Date.now();
@@ -112,9 +119,60 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
     return recent.length > signupsPerHour;
   }
 
+  // ---- Live play state ---------------------------------------------------------------------
+
+  const sockets = new Map(); // playerId → ws
+  const activeGame = new Map(); // playerId → game
+  const gamesById = new Map(); // gameId → game
+  const queue = new Map(); // tc → Array<{ playerId, rating, enteredAt }>
+  const rooms = new Map(); // code → { host, tc, createdAt }
+  const spectatingGame = new Map(); // playerId → gameId
+
+  const currentStats = () => {
+    let seeking = 0;
+    for (const list of queue.values()) seeking += list.length;
+    return {
+      online: sockets.size,
+      activeGames: gamesById.size,
+      seeking,
+      openRooms: rooms.size,
+    };
+  };
+
   async function route(req, res) {
     const { pathname } = new URL(req.url, "http://localhost");
-    if (req.method === "GET" && pathname === "/api/health") return json(res, 200, { ok: true, timeControls: Object.keys(timeControls) });
+    if (req.method === "GET" && pathname === "/api/health") {
+      return json(res, 200, { ok: true, timeControls: Object.keys(timeControls), ...currentStats() });
+    }
+    if (req.method === "GET" && pathname === "/api/stats") {
+      return json(res, 200, currentStats());
+    }
+    if (req.method === "GET" && pathname === "/api/rooms") {
+      const list = [];
+      for (const [code, r] of rooms) {
+        if (sockets.has(r.host)) {
+          list.push({ code, host: publicProfile(r.host), tc: r.tc, createdAt: r.createdAt });
+        }
+      }
+      return json(res, 200, list);
+    }
+    if (req.method === "GET" && pathname === "/api/games/live") {
+      const list = [];
+      for (const g of gamesById.values()) {
+        if (!g.over) {
+          list.push({
+            id: g.id,
+            tc: g.tc,
+            white: g.players.w,
+            black: g.players.b,
+            movesCount: g.chess.history().length,
+            startedAt: g.startedAt,
+            spectatorsCount: g.spectators.size,
+          });
+        }
+      }
+      return json(res, 200, list);
+    }
     if (req.method === "GET" && pathname === "/api/leaderboard") return json(res, 200, sql.leaderboard.all());
     if (req.method === "POST" && pathname === "/api/players") {
       if (signupLimited(req.socket.remoteAddress)) throw new HttpError(429, "Too many new players from this network, try later");
@@ -144,24 +202,21 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
     });
   });
 
-  // ---- Live play ---------------------------------------------------------------------------
-
-  const sockets = new Map(); // playerId → ws
-  const activeGame = new Map(); // playerId → game
-  const queue = new Map(); // time control → waiting playerId
-  const rooms = new Map(); // code → { host, tc }
+  // ---- Live play logic ---------------------------------------------------------------------
 
   const send = (playerId, msg) => {
     const ws = sockets.get(playerId);
     if (ws?.readyState === 1) ws.send(JSON.stringify(msg));
   };
-  const colorOf = (g, playerId) => (g.white === playerId ? "w" : "b");
+
+  const colorOf = (g, playerId) => (g.white === playerId ? "w" : g.black === playerId ? "b" : "s");
   const other = (color) => (color === "w" ? "b" : "w");
   const remaining = (g, color) => (g.over || g.chess.turn() !== color ? g.clock[color] : g.clock[color] - (Date.now() - g.turnStart));
 
   function state(g, playerId) {
+    const isPlayer = g.white === playerId || g.black === playerId;
     const color = colorOf(g, playerId);
-    const opponent = color === "w" ? g.black : g.white;
+    const opponent = isPlayer ? (color === "w" ? g.black : g.white) : null;
     return {
       id: g.id,
       tc: g.tc,
@@ -171,21 +226,82 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
       moves: g.chess.history({ verbose: true }).map((m) => m.lan),
       turn: g.chess.turn(),
       clock: { w: Math.max(0, remaining(g, "w")), b: Math.max(0, remaining(g, "b")) },
-      drawOffer: g.drawOffer,
-      opponentOnline: sockets.has(opponent),
+      drawOffer: isPlayer ? g.drawOffer : null,
+      opponentOnline: isPlayer ? sockets.has(opponent) : (sockets.has(g.white) && sockets.has(g.black)),
       over: g.over,
+      spectatorsCount: g.spectators.size,
     };
   }
 
-  const broadcast = (g) => [g.white, g.black].forEach((p) => send(p, { t: "game", game: state(g, p) }));
+  const broadcast = (g) => {
+    send(g.white, { t: "game", game: state(g, g.white) });
+    send(g.black, { t: "game", game: state(g, g.black) });
+    for (const specId of g.spectators) {
+      send(specId, { t: "game", game: state(g, specId) });
+    }
+  };
 
   function leaveLobby(playerId) {
-    for (const [tc, waiting] of queue) if (waiting === playerId) queue.delete(tc);
-    for (const [code, room] of rooms) if (room.host === playerId) rooms.delete(code);
+    for (const [tc, list] of queue) {
+      const filtered = list.filter((e) => e.playerId !== playerId);
+      if (filtered.length !== list.length) {
+        if (filtered.length > 0) queue.set(tc, filtered);
+        else queue.delete(tc);
+      }
+    }
+    for (const [code, room] of rooms) {
+      if (room.host === playerId) rooms.delete(code);
+    }
+  }
+
+  function unspectate(playerId) {
+    const gameId = spectatingGame.get(playerId);
+    if (!gameId) return;
+    spectatingGame.delete(playerId);
+    const g = gamesById.get(gameId);
+    if (g) {
+      g.spectators.delete(playerId);
+      broadcast(g);
+    }
+  }
+
+  function tryMatch(tc) {
+    const list = queue.get(tc);
+    if (!list || list.length < 2) return;
+
+    // Prune stale seekers
+    const valid = list.filter((e) => sockets.has(e.playerId) && !activeGame.has(e.playerId));
+    if (valid.length !== list.length) {
+      if (valid.length > 0) queue.set(tc, valid);
+      else queue.delete(tc);
+    }
+    if (valid.length < 2) return;
+
+    // Pair up: take the longest waiting player and pair with the closest rating opponent
+    const first = valid[0];
+    let bestIdx = 1;
+    let minDiff = Math.abs(first.rating - valid[1].rating);
+    for (let i = 2; i < valid.length; i++) {
+      const diff = Math.abs(first.rating - valid[i].rating);
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestIdx = i;
+      }
+    }
+    const second = valid[bestIdx];
+
+    // Atomically remove both
+    const remainingQueue = valid.filter((_, idx) => idx !== 0 && idx !== bestIdx);
+    if (remainingQueue.length > 0) queue.set(tc, remainingQueue);
+    else queue.delete(tc);
+
+    startGame(first.playerId, second.playerId, tc);
   }
 
   function startGame(a, b, tc) {
     [a, b].forEach(leaveLobby);
+    unspectate(a);
+    unspectate(b);
     const [white, black] = randomInt(2) ? [a, b] : [b, a];
     const [base, inc] = timeControls[tc];
     const g = {
@@ -198,18 +314,16 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
       clock: { w: base, b: base },
       inc,
       turnStart: Date.now(),
+      startedAt: Date.now(),
       drawOffer: null,
       over: null,
+      spectators: new Set(),
     };
     activeGame.set(white, g);
     activeGame.set(black, g);
+    gamesById.set(g.id, g);
     armFlag(g);
     broadcast(g);
-  }
-
-  function publicProfile(id) {
-    const { name, rating } = sql.profile.get(id);
-    return { id, name, rating };
   }
 
   // The side to move loses when its clock runs out; one timer per game, re-armed after every move.
@@ -253,6 +367,10 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
     g.drawOffer = null;
     activeGame.delete(g.white);
     activeGame.delete(g.black);
+    gamesById.delete(g.id);
+    for (const specId of g.spectators) {
+      spectatingGame.delete(specId);
+    }
     broadcast(g);
   }
 
@@ -291,19 +409,24 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
         if (g) throw new Error("Finish your current game first");
         if (!timeControls[msg.tc]) throw new Error("Unknown time control");
         leaveLobby(me);
-        const waiting = queue.get(msg.tc);
-        if (waiting && sockets.has(waiting)) return startGame(waiting, me, msg.tc);
-        queue.set(msg.tc, me);
-        return send(me, { t: "seeking", tc: msg.tc });
+        unspectate(me);
+        const myRating = sql.profile.get(me)?.rating ?? 1200;
+        const list = queue.get(msg.tc) ?? [];
+        list.push({ playerId: me, rating: myRating, enteredAt: Date.now() });
+        queue.set(msg.tc, list);
+        send(me, { t: "seeking", tc: msg.tc });
+        tryMatch(msg.tc);
+        return;
       }
       case "create": {
         if (g) throw new Error("Finish your current game first");
         if (!timeControls[msg.tc]) throw new Error("Unknown time control");
         leaveLobby(me);
+        unspectate(me);
         let code;
         do code = Array.from({ length: 5 }, () => CODE_CHARS[randomInt(CODE_CHARS.length)]).join("");
         while (rooms.has(code));
-        rooms.set(code, { host: me, tc: msg.tc });
+        rooms.set(code, { host: me, tc: msg.tc, createdAt: Date.now() });
         return send(me, { t: "room", code, tc: msg.tc });
       }
       case "join": {
@@ -315,8 +438,36 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
         rooms.delete(code);
         return startGame(room.host, me, room.tc);
       }
+      case "spectate": {
+        if (g) throw new Error("Finish your current game first");
+        leaveLobby(me);
+        unspectate(me);
+        const target = gamesById.get(msg.id);
+        if (!target || target.over) throw new Error("Game not found or finished");
+        target.spectators.add(me);
+        spectatingGame.set(me, target.id);
+        send(me, { t: "game", game: state(target, me) });
+        return;
+      }
+      case "unspectate": {
+        unspectate(me);
+        return send(me, { t: "idle" });
+      }
+      case "react": {
+        const emoji = String(msg.emoji ?? "");
+        if (!ALLOWED_EMOJIS.has(emoji)) throw new Error("Invalid emoji");
+        const targetGame = g || gamesById.get(spectatingGame.get(me));
+        if (!targetGame) throw new Error("You are not in or watching a game");
+        const senderProfile = publicProfile(me);
+        const reactionMsg = { t: "reaction", from: senderProfile.name, emoji };
+        send(targetGame.white, reactionMsg);
+        send(targetGame.black, reactionMsg);
+        for (const specId of targetGame.spectators) send(specId, reactionMsg);
+        return;
+      }
       case "cancel":
         leaveLobby(me);
+        unspectate(me);
         return send(me, { t: "idle" });
       case "move": {
         const color = inGame();
@@ -376,11 +527,12 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
       if (sockets.get(me) !== ws) return; // replaced by a newer connection
       sockets.delete(me);
       leaveLobby(me);
+      unspectate(me);
       const g = activeGame.get(me);
       if (g) broadcast(g); // opponent sees "offline"; the clock keeps running
     });
     const g = activeGame.get(me);
-    ws.send(JSON.stringify({ t: "hello", me: sql.profile.get(me), game: g ? state(g, me) : null }));
+    ws.send(JSON.stringify({ t: "hello", me: sql.profile.get(me), game: g ? state(g, me) : null, stats: currentStats() }));
     if (g) broadcast(g);
   }
 
@@ -392,6 +544,7 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
       ws.ping();
     }
   }, 30_000);
+
   // Upgraded sockets keep http.Server#close waiting forever, so shut live play down first.
   const closeHttp = server.close.bind(server);
   server.close = (callback) => {

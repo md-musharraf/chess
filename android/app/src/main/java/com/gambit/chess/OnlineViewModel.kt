@@ -13,8 +13,10 @@ import com.gambit.chess.net.ApiError
 import com.gambit.chess.net.GameRecord
 import com.gambit.chess.net.JSON
 import com.gambit.chess.net.Profile
+import com.gambit.chess.net.RoomInfo
 import com.gambit.chess.net.ServerGame
 import com.gambit.chess.net.ServerMsg
+import com.gambit.chess.net.ServerStats
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +41,8 @@ data class Lobby(
     val roomTc: String? = null,
     val leaderboard: List<Profile> = emptyList(),
     val recent: List<GameRecord> = emptyList(),
+    val stats: ServerStats? = null,
+    val openRooms: List<RoomInfo> = emptyList(),
     val error: String? = null,
 )
 
@@ -140,6 +144,8 @@ class OnlineViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         viewModelScope.launch {
             attempt { api.leaderboard() }.onSuccess { list -> lobbyState.update { it.copy(leaderboard = list) } }
+            attempt { api.stats() }.onSuccess { stats -> lobbyState.update { it.copy(stats = stats) } }
+            attempt { api.openRooms() }.onSuccess { rooms -> lobbyState.update { it.copy(openRooms = rooms) } }
             val token = services.token ?: return@launch
             attempt { api.me(token) }.onSuccess { me -> lobbyState.update { it.copy(me = me) } }
             attempt { api.myGames(token) }.onSuccess { list -> lobbyState.update { it.copy(recent = list) } }
@@ -198,7 +204,7 @@ class OnlineViewModel(app: Application) : AndroidViewModel(app) {
     private fun handle(msg: ServerMsg) {
         when (msg.t) {
             "hello" -> {
-                lobbyState.update { it.copy(me = msg.me ?: it.me) }
+                lobbyState.update { it.copy(me = msg.me ?: it.me, stats = msg.stats ?: it.stats) }
                 if (msg.game != null) sync(msg.game)
                 else if (gameInProgress) {
                     // It finished while we were away; the result is in recent games.
@@ -207,6 +213,7 @@ class OnlineViewModel(app: Application) : AndroidViewModel(app) {
                     refresh()
                 }
             }
+            "stats" -> lobbyState.update { it.copy(stats = msg.stats ?: it.stats) }
             "seeking" -> lobbyState.update { it.copy(seeking = msg.tc, room = null, error = null) }
             "room" -> lobbyState.update { it.copy(room = msg.code, roomTc = msg.tc, seeking = null, error = null) }
             "idle" -> lobbyState.update { it.copy(seeking = null, room = null) }

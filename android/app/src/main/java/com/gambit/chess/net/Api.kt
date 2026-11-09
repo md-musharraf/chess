@@ -33,6 +33,33 @@ data class Profile(
 @Serializable data class Clock(val w: Long, val b: Long)
 @Serializable data class Over(val result: String, val reason: String, val delta: Map<String, Int> = emptyMap())
 
+@Serializable
+data class ServerStats(
+    val online: Int = 0,
+    val activeGames: Int = 0,
+    val seeking: Int = 0,
+    val openRooms: Int = 0,
+)
+
+@Serializable
+data class RoomInfo(
+    val code: String,
+    val host: Seat,
+    val tc: String,
+    val createdAt: Long = 0,
+)
+
+@Serializable
+data class LiveGameSummary(
+    val id: String,
+    val tc: String,
+    val white: Seat,
+    val black: Seat,
+    val movesCount: Int = 0,
+    val startedAt: Long = 0,
+    val spectatorsCount: Int = 0,
+)
+
 /** The server's full view of a live game, sent on every change. */
 @Serializable
 data class ServerGame(
@@ -47,6 +74,7 @@ data class ServerGame(
     val drawOffer: String? = null,
     val opponentOnline: Boolean = true,
     val over: Over? = null,
+    val spectatorsCount: Int = 0,
 )
 
 @Serializable
@@ -57,6 +85,9 @@ data class ServerMsg(
     val code: String? = null,
     val tc: String? = null,
     val msg: String? = null,
+    val stats: ServerStats? = null,
+    val from: String? = null,
+    val emoji: String? = null,
 )
 
 @Serializable
@@ -107,6 +138,9 @@ class Api(private val baseUrl: () -> String) {
     suspend fun rename(token: String, name: String): Profile = JSON.decodeFromString(request("PUT", "/api/me", token, nameBody(name)))
     suspend fun leaderboard(): List<Profile> = JSON.decodeFromString(request("GET", "/api/leaderboard"))
     suspend fun myGames(token: String): List<GameRecord> = JSON.decodeFromString(request("GET", "/api/me/games", token))
+    suspend fun stats(): ServerStats = JSON.decodeFromString(request("GET", "/api/stats"))
+    suspend fun openRooms(): List<RoomInfo> = JSON.decodeFromString(request("GET", "/api/rooms"))
+    suspend fun liveGames(): List<LiveGameSummary> = JSON.decodeFromString(request("GET", "/api/games/live"))
 
     fun socket(token: String, listener: WebSocketListener): WebSocket =
         http.newWebSocket(Request.Builder().url(url("/ws")).header("Authorization", "Bearer $token").build(), listener)

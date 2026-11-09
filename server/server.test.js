@@ -59,7 +59,9 @@ async function matched(tc = "5+0") {
   const [white, black] = ga.color === "w" ? [ca, cb] : [cb, ca];
   white.profile = ga.color === "w" ? a : b;
   black.profile = ga.color === "w" ? b : a;
-  return { white, black };
+  white.gameId = ga.id;
+  black.gameId = ga.id;
+  return { white, black, gameId: ga.id };
 }
 
 test("quick match to fool's mate updates ratings, history and leaderboard", async () => {
@@ -148,4 +150,136 @@ test("auth and input validation", async () => {
   c.send({ t: "join", code: "ZZZZZ" });
   assert.equal((await c.next((m) => m.t === "error")).msg, "Room not found");
   c.ws.close();
+});
+
+test("multi-user: 10 concurrent players seeking matches pair into 5 distinct games", async () => {
+  const count = 10;
+  const players = await Promise.all(Array.from({ length: count }, (_, i) => signup(`Player_${i}`)));
+  const clients = await Promise.all(players.map((p) => connect(p.token)));
+
+  // All 10 send "seek" concurrently
+  const gamePromises = clients.map((c) => {
+    c.send({ t: "seek", tc: "5+0" });
+    return c.next((m) => m.t === "game");
+  });
+
+  const gameMessages = await Promise.all(gamePromises);
+  const gameIds = new Set(gameMessages.map((m) => m.game.id));
+  assert.equal(gameIds.size, 5, "10 players should form exactly 5 distinct games");
+
+  for (const m of gameMessages) {
+    assert.ok(m.game.white && m.game.black);
+    assert.ok(m.game.color === "w" || m.game.color === "b");
+  }
+
+  // Clean up games
+  for (let i = 0; i < clients.length; i += 2) clients[i].send({ t: "resign" });
+  for (const c of clients) c.ws.close();
+});
+
+test("multi-user: live games listing and spectating with reactions", async () => {
+  const { white, black, gameId } = await matched();
+  const specUser = await signup("Spectator");
+  const spec = await connect(specUser.token);
+
+  // Check live games API
+  const liveGames = (await api("/api/games/live")).body;
+  assert.ok(liveGames.some((g) => g.id === gameId), "Should list active game");
+
+  // Join as spectator
+  spec.send({ t: "spectate", id: gameId });
+  const specGame = (await spec.next((m) => m.t === "game")).game;
+  assert.equal(specGame.color, "s", "Spectator should receive color 's'");
+  assert.equal(specGame.id, gameId);
+
+  // White makes a move, spectator receives live move
+  white.send({ t: "move", uci: "e2e4" });
+  await black.next(gameWith((g) => g.moves.length === 1));
+  const specUpdate = (await spec.next(gameWith((g) => g.moves.length === 1))).game;
+  assert.deepEqual(specUpdate.moves, ["e2e4"]);
+
+  // Spectator sends emoji reaction
+  spec.send({ t: "react", emoji: "🔥" });
+  const reaction = await white.next((m) => m.t === "reaction");
+  assert.equal(reaction.from, "Spectator");
+  assert.equal(reaction.emoji, "🔥");
+
+  // Unspectate
+  spec.send({ t: "unspectate" });
+  assert.equal((await spec.next((m) => m.t === "idle")).t, "idle");
+
+  white.send({ t: "resign" });
+  await black.next(gameWith((g) => g.over));
+  spec.ws.close();
+});
+
+test("multi-user: open rooms discovery and live stats endpoint", async () => {
+  const host = await signup("HostUser");
+  const hostClient = await connect(host.token);
+
+  // Check initial stats
+  const statsBefore = (await api("/api/stats")).body;
+  assert.ok(typeof statsBefore.online === "number");
+
+  // Host creates a room
+  hostClient.send({ t: "create", tc: "5+0" });
+  const roomMsg = await hostClient.next((m) => m.t === "room");
+
+  // Other users see the room in open challenges
+  const rooms = (await api("/api/rooms")).body;
+  assert.ok(rooms.some((r) => r.code === roomMsg.code && r.host.name === "HostUser"));
+
+  // Join the open room
+  const guest = await signup("GuestUser");
+  const guestClient = await connect(guest.token);
+  guestClient.send({ t: "join", code: roomMsg.code });
+
+  const hostGame = (await hostClient.next((m) => m.t === "game")).game;
+  const guestGame = (await guestClient.next((m) => m.t === "game")).game;
+  assert.equal(hostGame.id, guestGame.id);
+
+  // Room is now removed from open rooms
+  const roomsAfter = (await api("/api/rooms")).body;
+  assert.ok(!roomsAfter.some((r) => r.code === roomMsg.code));
+
+  hostClient.send({ t: "resign" });
+  await guestClient.next(gameWith((g) => g.over));
+  hostClient.ws.close();
+  guestClient.ws.close();
+});
+
+test("multi-user: 20 concurrent players across time controls with parallel moves", async () => {
+  const count = 20;
+  const players = await Promise.all(Array.from({ length: count }, (_, i) => signup(`Parallel_${i}`)));
+  const clients = await Promise.all(players.map((p) => connect(p.token)));
+
+  // Half seek "5+0", half seek "bullet"
+  const seeks = clients.map((c, i) => {
+    const tc = i < 10 ? "5+0" : "bullet";
+    c.send({ t: "seek", tc });
+    return c.next((m) => m.t === "game");
+  });
+
+  const games = await Promise.all(seeks);
+  const ids = new Set(games.map((m) => m.game.id));
+  assert.equal(ids.size, 10, "20 players should form exactly 10 parallel games");
+
+  // Play concurrent moves in all games where client is White
+  const whites = clients.filter((c, i) => games[i].game.color === "w");
+  assert.equal(whites.length, 10);
+
+  const movePromises = whites.map(async (w) => {
+    w.send({ t: "move", uci: "e2e4" });
+    return w.next(gameWith((g) => g.moves.length === 1));
+  });
+
+  const movedGames = await Promise.all(movePromises);
+  assert.equal(movedGames.length, 10);
+  for (const m of movedGames) {
+    assert.deepEqual(m.game.moves, ["e2e4"]);
+  }
+
+  // Resign all games to clean up
+  for (const w of whites) w.send({ t: "resign" });
+  for (const c of clients) c.ws.close();
 });

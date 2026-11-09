@@ -90,6 +90,26 @@ fun OnlineLobby(
             Column(Modifier.widthIn(max = 520.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 ProfileCard(lobby)
 
+                lobby.stats?.let { s ->
+                    Surface(color = Palette.Surface, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(8.dp).clip(CircleShape).background(Palette.Accent))
+                                Spacer(Modifier.width(8.dp))
+                                Text("${s.online} Online", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Text("♟️ ${s.activeGames} Games", color = Palette.Muted, fontSize = 13.sp)
+                            if (s.seeking > 0) {
+                                Text("⏱️ ${s.seeking} Seeking", color = Palette.Gold, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+
                 lobby.error?.let { error ->
                     Surface(color = Palette.Danger.copy(alpha = 0.14f), shape = RoundedCornerShape(12.dp)) {
                         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -140,6 +160,32 @@ fun OnlineLobby(
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton(onClick = { onCreate(tc) }, enabled = online && !gameInProgress, modifier = Modifier.weight(1f)) { Text("Create room") }
                             OutlinedButton(onClick = { joining = true }, enabled = online && !gameInProgress, modifier = Modifier.weight(1f)) { Text("Join room") }
+                        }
+                    }
+                }
+
+                if (lobby.openRooms.isNotEmpty()) {
+                    SectionTitle("Open Challenges")
+                    Surface(color = Palette.Surface, shape = RoundedCornerShape(16.dp)) {
+                        Column(Modifier.padding(vertical = 4.dp)) {
+                            lobby.openRooms.forEach { room ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(room.host.name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                        Text("${room.host.rating} · ${room.tc}", color = Palette.Muted, fontSize = 12.sp)
+                                    }
+                                    val isSelf = room.host.id == lobby.me?.id
+                                    Button(
+                                        onClick = { onJoin(room.code) },
+                                        enabled = online && !gameInProgress && !isSelf,
+                                    ) {
+                                        Text(if (isSelf) "Your Room" else "Play")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
