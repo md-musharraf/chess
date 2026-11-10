@@ -151,7 +151,7 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
       const list = [];
       for (const [code, r] of rooms) {
         if (sockets.has(r.host)) {
-          list.push({ code, host: publicProfile(r.host), tc: r.tc, createdAt: r.createdAt });
+          list.push({ code, host: r.hostProfile || publicProfile(r.host), tc: r.tc, createdAt: r.createdAt });
         }
       }
       return json(res, 200, list);
@@ -165,7 +165,7 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
             tc: g.tc,
             white: g.players.w,
             black: g.players.b,
-            movesCount: g.chess.history().length,
+            movesCount: g.moves.length,
             startedAt: g.startedAt,
             spectatorsCount: g.spectators.size,
           });
@@ -223,7 +223,7 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
       color,
       white: g.players.w,
       black: g.players.b,
-      moves: g.chess.history({ verbose: true }).map((m) => m.lan),
+      moves: g.moves,
       turn: g.chess.turn(),
       clock: { w: Math.max(0, remaining(g, "w")), b: Math.max(0, remaining(g, "b")) },
       drawOffer: isPlayer ? g.drawOffer : null,
@@ -236,8 +236,12 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
   const broadcast = (g) => {
     send(g.white, { t: "game", game: state(g, g.white) });
     send(g.black, { t: "game", game: state(g, g.black) });
-    for (const specId of g.spectators) {
-      send(specId, { t: "game", game: state(g, specId) });
+    if (g.spectators.size > 0) {
+      const spectatorPayload = JSON.stringify({ t: "game", game: state(g, "s") });
+      for (const specId of g.spectators) {
+        const ws = sockets.get(specId);
+        if (ws?.readyState === 1) ws.send(spectatorPayload);
+      }
     }
   };
 
@@ -266,36 +270,38 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
   }
 
   function tryMatch(tc) {
-    const list = queue.get(tc);
-    if (!list || list.length < 2) return;
+    while (true) {
+      const list = queue.get(tc);
+      if (!list || list.length < 2) return;
 
-    // Prune stale seekers
-    const valid = list.filter((e) => sockets.has(e.playerId) && !activeGame.has(e.playerId));
-    if (valid.length !== list.length) {
-      if (valid.length > 0) queue.set(tc, valid);
-      else queue.delete(tc);
-    }
-    if (valid.length < 2) return;
-
-    // Pair up: take the longest waiting player and pair with the closest rating opponent
-    const first = valid[0];
-    let bestIdx = 1;
-    let minDiff = Math.abs(first.rating - valid[1].rating);
-    for (let i = 2; i < valid.length; i++) {
-      const diff = Math.abs(first.rating - valid[i].rating);
-      if (diff < minDiff) {
-        minDiff = diff;
-        bestIdx = i;
+      // Prune stale seekers
+      const valid = list.filter((e) => sockets.has(e.playerId) && !activeGame.has(e.playerId));
+      if (valid.length !== list.length) {
+        if (valid.length > 0) queue.set(tc, valid);
+        else queue.delete(tc);
       }
+      if (valid.length < 2) return;
+
+      // Pair up: take the longest waiting player and pair with the closest rating opponent
+      const first = valid[0];
+      let bestIdx = 1;
+      let minDiff = Math.abs(first.rating - valid[1].rating);
+      for (let i = 2; i < valid.length; i++) {
+        const diff = Math.abs(first.rating - valid[i].rating);
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestIdx = i;
+        }
+      }
+      const second = valid[bestIdx];
+
+      // Atomically remove both
+      const remainingQueue = valid.filter((_, idx) => idx !== 0 && idx !== bestIdx);
+      if (remainingQueue.length > 0) queue.set(tc, remainingQueue);
+      else queue.delete(tc);
+
+      startGame(first.playerId, second.playerId, tc);
     }
-    const second = valid[bestIdx];
-
-    // Atomically remove both
-    const remainingQueue = valid.filter((_, idx) => idx !== 0 && idx !== bestIdx);
-    if (remainingQueue.length > 0) queue.set(tc, remainingQueue);
-    else queue.delete(tc);
-
-    startGame(first.playerId, second.playerId, tc);
   }
 
   function startGame(a, b, tc) {
@@ -311,6 +317,7 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
       black,
       players: { w: publicProfile(white), b: publicProfile(black) },
       chess: new Chess(),
+      moves: [],
       clock: { w: base, b: base },
       inc,
       turnStart: Date.now(),
@@ -381,7 +388,8 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
     const left = remaining(g, color);
     if (left <= 0) return finish(g, color === "w" ? "0-1" : "1-0", "timeout");
     try {
-      g.chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
+      const moveObj = g.chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
+      g.moves.push(moveObj.lan);
     } catch {
       throw new Error("Illegal move");
     }
@@ -426,7 +434,7 @@ export function createServer({ dbPath = ":memory:", timeControls = TIME_CONTROLS
         let code;
         do code = Array.from({ length: 5 }, () => CODE_CHARS[randomInt(CODE_CHARS.length)]).join("");
         while (rooms.has(code));
-        rooms.set(code, { host: me, tc: msg.tc, createdAt: Date.now() });
+        rooms.set(code, { host: me, hostProfile: publicProfile(me), tc: msg.tc, createdAt: Date.now() });
         return send(me, { t: "room", code, tc: msg.tc });
       }
       case "join": {

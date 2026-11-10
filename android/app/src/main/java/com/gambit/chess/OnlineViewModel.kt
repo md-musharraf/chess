@@ -18,6 +18,7 @@ import com.gambit.chess.net.ServerGame
 import com.gambit.chess.net.ServerMsg
 import com.gambit.chess.net.ServerStats
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -143,12 +144,18 @@ class OnlineViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refresh() {
         viewModelScope.launch {
-            attempt { api.leaderboard() }.onSuccess { list -> lobbyState.update { it.copy(leaderboard = list) } }
-            attempt { api.stats() }.onSuccess { stats -> lobbyState.update { it.copy(stats = stats) } }
-            attempt { api.openRooms() }.onSuccess { rooms -> lobbyState.update { it.copy(openRooms = rooms) } }
-            val token = services.token ?: return@launch
-            attempt { api.me(token) }.onSuccess { me -> lobbyState.update { it.copy(me = me) } }
-            attempt { api.myGames(token) }.onSuccess { list -> lobbyState.update { it.copy(recent = list) } }
+            val leaderboardDeferred = async { attempt { api.leaderboard() } }
+            val statsDeferred = async { attempt { api.stats() } }
+            val roomsDeferred = async { attempt { api.openRooms() } }
+            val token = services.token
+            val meDeferred = if (token != null) async { attempt { api.me(token) } } else null
+            val gamesDeferred = if (token != null) async { attempt { api.myGames(token) } } else null
+
+            leaderboardDeferred.await().onSuccess { list -> lobbyState.update { it.copy(leaderboard = list) } }
+            statsDeferred.await().onSuccess { stats -> lobbyState.update { it.copy(stats = stats) } }
+            roomsDeferred.await().onSuccess { rooms -> lobbyState.update { it.copy(openRooms = rooms) } }
+            meDeferred?.await()?.onSuccess { me -> lobbyState.update { it.copy(me = me) } }
+            gamesDeferred?.await()?.onSuccess { list -> lobbyState.update { it.copy(recent = list) } }
         }
     }
 

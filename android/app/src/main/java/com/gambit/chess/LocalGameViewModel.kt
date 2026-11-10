@@ -43,7 +43,7 @@ class LocalGameViewModel(app: Application) : AndroidViewModel(app) {
     val ui: StateFlow<GameUi?> = state
 
     fun start(vsComputer: Boolean, level: Level, color: Int) {
-        val userColor = if (color == 0) listOf(WHITE, BLACK).random() else color
+        val userColor = if (color == 0) (if (kotlin.random.Random.nextBoolean()) WHITE else BLACK) else color
         load(SavedGame(vsComputer, level, userColor, emptyList()))
     }
 

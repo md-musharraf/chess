@@ -91,9 +91,30 @@ private fun transition(old: IntArray, new: IntArray, dropFrom: Int, dropTo: Int)
     for (to in 0..63) {
         val p = new[to]
         if (p == 0 || old[to] == p) continue
-        val src = gone.filter { old[it] == p }.minByOrNull { distance(it, to) }
-            ?: gone.filter { old[it] == PAWN * p.sign && rankOf(to) % 7 == 0 }.minByOrNull { distance(it, to) }
-        if (src == null) {
+        var src = -1
+        var minDist = Int.MAX_VALUE
+        for (sq in gone) {
+            if (old[sq] == p) {
+                val d = distance(sq, to)
+                if (d < minDist) {
+                    minDist = d
+                    src = sq
+                }
+            }
+        }
+        if (src == -1 && rankOf(to) % 7 == 0) {
+            val pawnP = PAWN * p.sign
+            for (sq in gone) {
+                if (old[sq] == pawnP) {
+                    val d = distance(sq, to)
+                    if (d < minDist) {
+                        minDist = d
+                        src = sq
+                    }
+                }
+            }
+        }
+        if (src == -1) {
             fadeIn += to
             continue
         }
@@ -152,6 +173,10 @@ fun ChessBoard(
             haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
             onMoveNow(options[0])
         }
+    }
+
+    val targets = remember(selected, showLegal, view.legal) {
+        if (selected >= 0 && showLegal) view.legal.filter { moveFrom(it) == selected } else emptyList()
     }
 
     val measurer = rememberTextMeasurer()
@@ -244,7 +269,6 @@ fun ChessBoard(
                 drawText(ranks[rank], color = if (isDark(left)) theme.light else theme.dark, topLeft = Offset(s * 0.06f, i * s + s * 0.03f))
             }
 
-            val targets = if (selected >= 0 && showLegal) view.legal.filter { moveFrom(it) == selected } else emptyList()
             for (m in targets) if (board[moveTo(m)] != 0) drawCircle(TargetColor, s * 0.44f, center(moveTo(m)), style = Stroke(s * 0.09f))
 
             val p = progress.value

@@ -165,25 +165,22 @@ fun OnlineLobby(
                 }
 
                 if (lobby.openRooms.isNotEmpty()) {
-                    SectionTitle("Open Challenges")
-                    Surface(color = Palette.Surface, shape = RoundedCornerShape(16.dp)) {
-                        Column(Modifier.padding(vertical = 4.dp)) {
-                            lobby.openRooms.forEach { room ->
-                                Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                    LobbySection("Open Challenges", paddingVertical = 4.dp) {
+                        lobby.openRooms.forEach { room ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(room.host.name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                    Text("${room.host.rating} · ${room.tc}", color = Palette.Muted, fontSize = 12.sp)
+                                }
+                                val isSelf = room.host.id == lobby.me?.id
+                                Button(
+                                    onClick = { onJoin(room.code) },
+                                    enabled = online && !gameInProgress && !isSelf,
                                 ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(room.host.name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                                        Text("${room.host.rating} · ${room.tc}", color = Palette.Muted, fontSize = 12.sp)
-                                    }
-                                    val isSelf = room.host.id == lobby.me?.id
-                                    Button(
-                                        onClick = { onJoin(room.code) },
-                                        enabled = online && !gameInProgress && !isSelf,
-                                    ) {
-                                        Text(if (isSelf) "Your Room" else "Play")
-                                    }
+                                    Text(if (isSelf) "Your Room" else "Play")
                                 }
                             }
                         }
@@ -191,53 +188,47 @@ fun OnlineLobby(
                 }
 
                 if (lobby.leaderboard.isNotEmpty()) {
-                    SectionTitle("Leaderboard")
-                    Surface(color = Palette.Surface, shape = RoundedCornerShape(16.dp)) {
-                        Column(Modifier.padding(vertical = 6.dp)) {
-                            lobby.leaderboard.take(20).forEachIndexed { i, p ->
-                                val me = p.id == lobby.me?.id
-                                Row(
-                                    Modifier.fillMaxWidth().background(if (me) Palette.Accent.copy(alpha = 0.10f) else Color.Transparent)
-                                        .padding(horizontal = 16.dp, vertical = 9.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        "${i + 1}", modifier = Modifier.width(30.dp), fontWeight = FontWeight.Bold,
-                                        color = when (i) { 0 -> Palette.Gold; 1 -> Color(0xFFC9CED6); 2 -> Color(0xFFD08B5B); else -> Palette.Muted },
-                                    )
-                                    Text(p.name + if (me) " (you)" else "", modifier = Modifier.weight(1f), maxLines = 1)
-                                    Text("${p.wins}/${p.draws}/${p.losses}", color = Palette.Muted, fontSize = 12.sp, modifier = Modifier.padding(end = 14.dp))
-                                    Text("${p.rating}", fontWeight = FontWeight.SemiBold)
-                                }
+                    LobbySection("Leaderboard") {
+                        lobby.leaderboard.take(20).forEachIndexed { i, p ->
+                            val me = p.id == lobby.me?.id
+                            Row(
+                                Modifier.fillMaxWidth().background(if (me) Palette.Accent.copy(alpha = 0.10f) else Color.Transparent)
+                                    .padding(horizontal = 16.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "${i + 1}", modifier = Modifier.width(30.dp), fontWeight = FontWeight.Bold,
+                                    color = when (i) { 0 -> Palette.Gold; 1 -> Color(0xFFC9CED6); 2 -> Color(0xFFD08B5B); else -> Palette.Muted },
+                                )
+                                Text(p.name + if (me) " (you)" else "", modifier = Modifier.weight(1f), maxLines = 1)
+                                Text("${p.wins}/${p.draws}/${p.losses}", color = Palette.Muted, fontSize = 12.sp, modifier = Modifier.padding(end = 14.dp))
+                                Text("${p.rating}", fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
                 }
 
                 if (lobby.recent.isNotEmpty()) {
-                    SectionTitle("Your recent games")
-                    Surface(color = Palette.Surface, shape = RoundedCornerShape(16.dp)) {
-                        Column(Modifier.padding(vertical = 6.dp)) {
-                            for (g in lobby.recent) {
-                                val won = (g.result == "1-0" && g.color == "w") || (g.result == "0-1" && g.color == "b")
-                                val draw = g.result == "1/2-1/2"
-                                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        Modifier.size(28.dp).clip(RoundedCornerShape(8.dp))
-                                            .background(if (draw) Palette.Gold else if (won) Palette.Accent else Palette.Danger),
-                                        contentAlignment = Alignment.Center,
-                                    ) { Text(if (draw) "½" else if (won) "W" else "L", color = Palette.OnAccent, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text("vs ${g.opponent}", maxLines = 1)
-                                        Text(
-                                            "${g.tc} · ${reasonText(g.reason)} · " +
-                                                ago(g.endedAt),
-                                            color = Palette.Muted, fontSize = 12.sp, maxLines = 1,
-                                        )
-                                    }
-                                    Text(if (g.delta >= 0) "+${g.delta}" else "${g.delta}", color = if (g.delta >= 0) Palette.Accent else Palette.Danger, fontWeight = FontWeight.SemiBold)
+                    LobbySection("Your recent games") {
+                        for (g in lobby.recent) {
+                            val won = (g.result == "1-0" && g.color == "w") || (g.result == "0-1" && g.color == "b")
+                            val draw = g.result == "1/2-1/2"
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    Modifier.size(28.dp).clip(RoundedCornerShape(8.dp))
+                                        .background(if (draw) Palette.Gold else if (won) Palette.Accent else Palette.Danger),
+                                    contentAlignment = Alignment.Center,
+                                ) { Text(if (draw) "½" else if (won) "W" else "L", color = Palette.OnAccent, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("vs ${g.opponent}", maxLines = 1)
+                                    Text(
+                                        "${g.tc} · ${reasonText(g.reason)} · " +
+                                            ago(g.endedAt),
+                                        color = Palette.Muted, fontSize = 12.sp, maxLines = 1,
+                                    )
                                 }
+                                Text(if (g.delta >= 0) "+${g.delta}" else "${g.delta}", color = if (g.delta >= 0) Palette.Accent else Palette.Danger, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -260,6 +251,18 @@ private fun ago(time: Long): CharSequence {
 
 @Composable
 private fun SectionTitle(text: String) = Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+
+@Composable
+private fun LobbySection(
+    title: String,
+    paddingVertical: androidx.compose.ui.unit.Dp = 6.dp,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    SectionTitle(title)
+    Surface(color = Palette.Surface, shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.padding(vertical = paddingVertical), content = content)
+    }
+}
 
 @Composable
 private fun ConnectionChip(c: Connection) {

@@ -111,12 +111,42 @@ data class ResultInfo(
 private val START_COUNT = intArrayOf(0, 8, 2, 2, 2, 1, 0)
 private val POINTS = intArrayOf(0, 1, 3, 3, 5, 9, 0)
 
-/** Pieces of the opponent of [color] no longer on the board, cheapest first. */
-private fun capturedBy(board: IntArray, color: Int): List<Int> = buildList {
-    for (type in PAWN..QUEEN) repeat(max(0, START_COUNT[type] - board.count { it == -color * type })) { add(-color * type) }
+private class BoardMaterial(
+    val whiteAdvantage: Int,
+    val whiteCaptured: List<Int>,
+    val blackCaptured: List<Int>,
+) {
+    companion object {
+        fun of(board: IntArray): BoardMaterial {
+            val whiteCounts = IntArray(7)
+            val blackCounts = IntArray(7)
+            var whiteScore = 0
+            var blackScore = 0
+            for (sq in 0..63) {
+                val pc = board[sq]
+                if (pc > 0) {
+                    whiteCounts[pc]++
+                    whiteScore += POINTS[pc]
+                } else if (pc < 0) {
+                    val type = -pc
+                    blackCounts[type]++
+                    blackScore += POINTS[type]
+                }
+            }
+            val whiteCaptured = buildList {
+                for (type in PAWN..QUEEN) {
+                    repeat(max(0, START_COUNT[type] - blackCounts[type])) { add(-type) }
+                }
+            }
+            val blackCaptured = buildList {
+                for (type in PAWN..QUEEN) {
+                    repeat(max(0, START_COUNT[type] - whiteCounts[type])) { add(type) }
+                }
+            }
+            return BoardMaterial(whiteScore - blackScore, whiteCaptured, blackCaptured)
+        }
+    }
 }
-
-private fun material(board: IntArray, color: Int) = board.sumOf { if (it * color > 0) POINTS[abs(it)] else 0 }
 
 @Composable
 fun GameScreen(
@@ -202,11 +232,13 @@ fun GameScreen(
         GameAction(Icons.Rounded.ChevronRight, "Next", view.ply < view.livePly) { onBrowse(view.ply + 1) },
     )
     val allActions = browse + actions
+    val mat = remember(board) { BoardMaterial.of(board) }
 
     @Composable
     fun Player(p: PlayerUi) {
-        val advantage = material(board, p.color) - material(board, -p.color)
-        PlayerBar(p, capturedBy(board, p.color), advantage, over = ui.outcome != null)
+        val advantage = if (p.color == WHITE) mat.whiteAdvantage else -mat.whiteAdvantage
+        val captured = if (p.color == WHITE) mat.whiteCaptured else mat.blackCaptured
+        PlayerBar(p, captured, advantage, over = ui.outcome != null)
     }
 
     @Composable

@@ -11,6 +11,9 @@ class Game {
     private val played = ArrayList<Int>()
     private val sans = ArrayList<String>()
     private val boards = arrayListOf(position.board.copyOf())
+    private val evals = arrayListOf(evaluateFromWhite(position))
+    private val openings = arrayListOf<String?>(null)
+    private var defaultPgn: String? = null
 
     val moves: List<Int> get() = played
     val sanMoves: List<String> get() = sans
@@ -18,6 +21,8 @@ class Game {
         private set
 
     fun boardAt(ply: Int): IntArray = boards[ply]
+    fun evalAt(ply: Int): Int = evals[ply.coerceIn(0, evals.lastIndex)]
+    fun openingAt(ply: Int): String? = openings[ply.coerceIn(0, openings.lastIndex)]
     fun legalMoves(): IntArray = if (outcome != null) IntArray(0) else position.legalMoves()
 
     fun play(m: Int) {
@@ -25,6 +30,10 @@ class Game {
         position.make(m)
         played += m
         boards += position.board.copyOf()
+        evals += evaluateFromWhite(position)
+        val ucis = played.map(::uci)
+        openings += OpeningBook.find(ucis)?.name ?: openings.lastOrNull()
+        defaultPgn = null
         outcome = ruleOutcome()
     }
 
@@ -41,6 +50,9 @@ class Game {
         played.removeAt(played.lastIndex)
         sans.removeAt(sans.lastIndex)
         boards.removeAt(boards.lastIndex)
+        evals.removeAt(evals.lastIndex)
+        openings.removeAt(openings.lastIndex)
+        defaultPgn = null
         outcome = null
     }
 
@@ -109,10 +121,19 @@ class Game {
     /** Returns the FEN string of the current board state. */
     fun currentFen(): String = position.toFen(fullmove = (played.size / 2) + 1)
 
-    /** Generates a standard PGN string for this game. */
+    /** Generates a standard PGN string for this game with default headers, cached until moves change. */
+    fun toPgn(): String {
+        defaultPgn?.let { return it }
+        val date = java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale.US).format(java.util.Date())
+        val text = toPgn(white = "White", black = "Black", event = "Gambit Chess Game", site = "Gambit Mobile", date = date)
+        defaultPgn = text
+        return text
+    }
+
+    /** Generates a PGN string with custom headers. */
     fun toPgn(
-        white: String = "White",
-        black: String = "Black",
+        white: String,
+        black: String,
         event: String = "Gambit Chess Game",
         site: String = "Gambit Mobile",
         date: String = java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale.US).format(java.util.Date()),

@@ -209,9 +209,15 @@ class Position private constructor() {
                             if (rankOf(from) == (if (us == WHITE) 1 else 6) && board[two] == 0) out[n++] = move(from, two, 0, DOUBLE_PUSH)
                         }
                     }
-                    for (df in intArrayOf(-1, 1)) {
-                        if (fileOf(from) + df !in 0..7) continue
-                        val to = fwd + df
+                    val f = fileOf(from)
+                    if (f > 0) {
+                        val to = fwd - 1
+                        if (board[to] * us < 0) {
+                            if (promoting) n = addPromotions(out, n, from, to, CAPTURE) else out[n++] = move(from, to, 0, CAPTURE)
+                        } else if (to == ep) out[n++] = move(from, to, 0, CAPTURE or EN_PASSANT)
+                    }
+                    if (f < 7) {
+                        val to = fwd + 1
                         if (board[to] * us < 0) {
                             if (promoting) n = addPromotions(out, n, from, to, CAPTURE) else out[n++] = move(from, to, 0, CAPTURE)
                         } else if (to == ep) out[n++] = move(from, to, 0, CAPTURE or EN_PASSANT)

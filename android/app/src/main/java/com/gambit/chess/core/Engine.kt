@@ -60,7 +60,14 @@ class Engine {
         }
         if (stopped) return 0
         val best = scores.max()
-        return root[root.indices.filter { scores[it] >= best - level.margin }.random(random)]
+        val threshold = best - level.margin
+        var count = 0
+        for (i in root.indices) if (scores[i] >= threshold) count++
+        var pick = random.nextInt(count)
+        for (i in root.indices) {
+            if (scores[i] >= threshold && pick-- == 0) return root[i]
+        }
+        return root[0]
     }
 
     private fun deepen(root: IntArray, maxDepth: Int, timeMs: Long): Int {
@@ -239,7 +246,7 @@ internal fun evaluate(p: Position): Int {
         if (pc == 0) continue
         val type = abs(pc)
         val sign = if (pc > 0) 1 else -1
-        val idx = if (pc > 0) (7 - rankOf(sq)) * 8 + fileOf(sq) else sq
+        val idx = if (pc > 0) sq xor 56 else sq
         if (type == KING) {
             mid += sign * KING_MIDDLE[idx]
             end += sign * KING_END[idx]
